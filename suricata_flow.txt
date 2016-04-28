@@ -1,0 +1,40 @@
+1. suricata.c main()-->FlowManagerThreadSpawn-->TmThreadCreateMgmtThreadByName("FlowManagerThread",
+                "FlowManager", 0);
+name = "FlowManagerThread"
+module = "FlowManager"
+
+2. TmThreadCreateMgmtThreadByName --> TmThreadCreate: name =  "FlowManagerThread" ; slots ="management"
+ -->   TmThreadSetSlots
+  } else if (strcmp(name, "management") == 0) {
+        tv->tm_func = TmThreadsManagement;
+
+3. TmThreadCreateMgmtThreadByName  --> TmModuleGetByName 
+    tmm_modules[TMM_FLOWMANAGER].name = "FlowManager";
+    tmm_modules[TMM_FLOWMANAGER].ThreadInit = FlowManagerThreadInit;
+    tmm_modules[TMM_FLOWMANAGER].ThreadDeinit = FlowManagerThreadDeinit;
+//    tmm_modules[TMM_FLOWMANAGER].RegisterTests = FlowManagerRegisterTests;
+    tmm_modules[TMM_FLOWMANAGER].Management = FlowManager;
+    tmm_modules[TMM_FLOWMANAGER].cap_flags = 0;
+    tmm_modules[TMM_FLOWMANAGER].flags = TM_FLAG_MANAGEMENT_TM;
+
+_TmSlotSetFuncAppend(ThreadVars *tv, TmModule *tm, void *data)
+
+    slot->tv = tv;
+    slot->SlotThreadInit = tm->ThreadInit;
+    slot->slot_initdata = data;
+    SC_ATOMIC_INIT(slot->SlotFunc);
+    (void)SC_ATOMIC_SET(slot->SlotFunc, tm->Func);
+    slot->PktAcqLoop = tm->PktAcqLoop;
+    slot->Management = tm->Management;
+    slot->SlotThreadExitPrintStats = tm->ThreadExitPrintStats;
+    slot->SlotThreadDeinit = tm->ThreadDeinit;
+
+4. FlowManagerThreadSpawn --> TmThreadSpawn --> TmThreadsManagement
+
+5. TmThreadsManagement --> slot->SlotThreadInit --> FlowManagerThreadInit
+SC_ATOMIC_SET(s->slot_data, slot_data)  s->slot_data = FlowManagerThreadData *ftd
+r = s->Management(tv, SC_ATOMIC_GET(s->slot_data))= FlowManager;(Thread that manages the flow table and times out flows.)
+
+
+
+

@@ -1,0 +1,124 @@
+1. RunModeDispatch--> RUNMODE_PFRING-->RunModeIdsPfringGetDefaultMode-->autofp-->RunModeIdsPfringAutoFp
+2. RunModeDispatch-->RunModeGetCustomMode-->RunModeFunc-->RunModeIdsPfringAutoFp
+3. RunModeIdsPfringAutoFp-->RunModeSetLiveCaptureAutoFp:
+recv_mod_name = "ReceivePfring"
+decode_mod_name = "DecodePfring"
+thread_name = "RxPFR"
+
+4. RunModeSetLiveCaptureAutoFp-->TmThreadCreatePacketHandler(ThreadVars *tv_receive):
+inq_name ="packetpool", inqh_name= "packetpool"
+outq_name ="pickup1", outqh_name = "flow", slots = "pktacqloop"
+
+set the incoming queue: inqh_name= "packetpool"
+tv->tmqh_in = tmqh->InHandler = tmqh_table[TMQH_PACKETPOOL].InHandler = TmqhInputPacketpool;
+
+set the outgoing queue: outqh_name = "flow"
+tv->tmqh_out = tmqh->OutHandler = (TmqhFlowRegister) tmqh_table[TMQH_FLOW].OutHandler = TmqhOutputFlowActivePackets;
+
+tv->outctx = tmqh->OutHandlerCtxSetup(outq_name) = TmqhOutputFlowSetupCtx("pickup1")
+create a TmqhFlowCtx *ctx .
+
+set the slot functions.slots = "pktacqloop"
+tv->tm_func = TmThreadsSlotPktAcqLoop;
+
+5. RunModeSetLiveCaptureAutoFp-->
+5.1 TmModule *tm_module = TmModuleGetByName("ReceivePfring");
+    tmm_modules[TMM_RECEIVEPFRING].name = "ReceivePfring";
+    tmm_modules[TMM_RECEIVEPFRING].ThreadInit = ReceivePfringThreadInit;
+    tmm_modules[TMM_RECEIVEPFRING].Func = NULL;
+    tmm_modules[TMM_RECEIVEPFRING].PktAcqLoop = ReceivePfringLoop;
+    tmm_modules[TMM_RECEIVEPFRING].PktAcqBreakLoop = PfringBreakLoop;
+    tmm_modules[TMM_RECEIVEPFRING].ThreadExitPrintStats = ReceivePfringThreadExitStats;
+    tmm_modules[TMM_RECEIVEPFRING].ThreadDeinit = ReceivePfringThreadDeinit;
+    tmm_modules[TMM_RECEIVEPFRING].RegisterTests = NULL;
+    tmm_modules[TMM_RECEIVEPFRING].flags = TM_FLAG_RECEIVE_TM;
+
+TmSlotSetFuncAppend(tv_receive, tm_module, ParsePfringConfig);
+    SC_ATOMIC_INIT(slot->slot_data);
+    slot->tv = tv;
+    slot->SlotThreadInit = ReceivePfringThreadInit;
+    slot->slot_initdata = ParsePfringConfig;
+    SC_ATOMIC_INIT(slot->SlotFunc);
+    (void)SC_ATOMIC_SET(slot->SlotFunc, NULL);
+    slot->PktAcqLoop = ReceivePfringLoop;
+    slot->Management = tm->Management;
+    slot->SlotThreadExitPrintStats = tm->ThreadExitPrintStats;
+    slot->SlotThreadDeinit = tm->ThreadDeinit;
+
+tv->tm_slots = slot;(append the new slot)
+
+5.2
+ tm_module = TmModuleGetByName("DecodePfring");
+    tmm_modules[TMM_DECODEPFRING].name = "DecodePfring";
+    tmm_modules[TMM_DECODEPFRING].ThreadInit = DecodePfringThreadInit;
+    tmm_modules[TMM_DECODEPFRING].Func = DecodePfring;
+    tmm_modules[TMM_DECODEPFRING].ThreadExitPrintStats = NULL;
+    tmm_modules[TMM_DECODEPFRING].ThreadDeinit = DecodePfringThreadDeinit;
+    tmm_modules[TMM_DECODEPFRING].RegisterTests = NULL;
+    tmm_modules[TMM_DECODEPFRING].flags = TM_FLAG_DECODE_TM;
+
+
+TmSlotSetFuncAppend(tv_receive, tm_module, NULL);
+    SC_ATOMIC_INIT(slot->slot_data);
+    slot->tv = tv;
+    slot->SlotThreadInit = DecodePfringThreadInit;
+    slot->slot_initdata = NULL;
+    SC_ATOMIC_INIT(slot->SlotFunc);
+    (void)SC_ATOMIC_SET(slot->SlotFunc, DecodePfring);
+    slot->PktAcqLoop = NULL;
+    slot->Management = tm->Management;
+    slot->SlotThreadExitPrintStats = tm->ThreadExitPrintStats;
+    slot->SlotThreadDeinit = tm->ThreadDeinit;
+
+tv->tm_slots = slot;(append the new slot)
+
+
+6. RunModeSetLiveCaptureAutoFp---> TmThreadSpawn(tv_receive)-->pthread_create(&tv->t, &attr, tv->tm_func, (void *)tv);
+see the step 4:
+set the slot functions.slots = "pktacqloop"
+tv->tm_func = TmThreadsSlotPktAcqLoop;
+Going on:
+TmThreadsSlotPktAcqLoop(tv_receive)
+
+7. TmThreadsSlotPktAcqLoop--> SCSetThreadName: RxPFR1(please see step 3)
+
+8. TmThreadsSlotPktAcqLoop--> SlotThreadInit
+please see step 5.1 and 5.2
+8.1 call slot 1's thread init. slot->SlotThreadInit(tv, slot->slot_initdata, &slot_data)--> 5.1 (ReceivePfring) --> ReceivePfringThreadInit(ThreadVars *tv, void *initdata, void **data).
+ReceivePfringThreadInit --> PfringThreadVars *ptv = SCMalloc(sizeof(PfringThreadVars));
+ptv->pd = pfring_open(ptv->interface, (uint32_t)default_packet_size, opflag);
+*data = (void *)ptv;
+(void)SC_ATOMIC_SET(slot->slot_data, slot_data); set slot->slot_data= PfringThreadVars *ptv
+
+8.2 call slot 2's thread init. slot->SlotThreadInit(tv, slot->slot_initdata, &slot_data)--> 5.2(DecodePfring) --> DecodePfringThreadInit
+  DecodeThreadVars *dtv = NULL;
+  dtv = DecodeThreadVarsAlloc(tv);
+  *data = (void *)dtv;
+
+(void)SC_ATOMIC_SET(slot->slot_data, slot_data); set slot->slot_data= DecodeThreadVars *dtv
+
+9. TmThreadsSlotPktAcqLoop--> PktAcqLoop
+r = s->PktAcqLoop(tv, SC_ATOMIC_GET(s->slot_data), s);
+equals 
+r = tv_receive->tm_slots(ReceivePfring)->PktAcqLoop(tv_receive, PfringThreadVars, tv_receive->tm_slots)
+
+10 ReceivePfringLoop:
+10.1 move slot to next. ptv->slot = s->slot_next; point to DecodePfring, please see 5.2
+10.2         int r = pfring_recv(ptv->pd, &pkt_buffer,
+                buffer_size,
+                &hdr,
+                LIBPFRING_WAIT_FOR_INCOMING);
+10.3 TmThreadsSlotProcessPkt(ptv->tv, ptv->slot, p) -->TmThreadsSlotVarRun(tv, p, s)
+TmThreadsSlotVarRun(tv, p, s) == TmThreadsSlotVarRun(tv, p, DecodePfring)
+TmSlotFunc SlotFunc = SC_ATOMIC_GET(s->SlotFunc) = DecodePfring, please step 5.2
+
+10.4 ReceivePfringLoop --> pfring_recv 
+10.4.1 ReceivePfringLoop --> PfringProcessPacket
+10.4.2 ReceivePfringLoop --> TmThreadsSlotProcessPkt --> TmThreadsSlotVarRun --> DecodePfring --> DecodeEthernet
+--> DecodeIPV4 --> DecodeTCP --> FlowHandlePacket: set packet->flow
+
+
+10.5 tv->tmqh_out(tv, p);--> tmqh_table[TMQH_FLOW].OutHandler = TmqhOutputFlowActivePackets
+TmqhOutputFlowActivePackets(tv,p); please see step 4.
+TmqhOutputFlowActivePackets--> PacketEnqueue(q, p);
+ 

@@ -1,0 +1,38 @@
+1. suricata.c main --> FlowRecyclerThreadSpawn
+        tv_flowmgr = TmThreadCreateMgmtThreadByName("FlowRecyclerThread",
+                "FlowRecycler", 0);
+name = "FlowRecyclerThread"
+module = "FlowRecycler"
+
+2. TmThreadCreateMgmtThreadByName: name = "FlowRecyclerThread" slots = "management"
+ -->   TmThreadSetSlots
+  } else if (strcmp(name, "management") == 0) {
+        tv->tm_func = TmThreadsManagement;
+
+3. TmThreadCreateMgmtThreadByName  --> TmModuleGetByName 
+    tmm_modules[TMM_FLOWRECYCLER].name = "FlowRecycler";
+    tmm_modules[TMM_FLOWRECYCLER].ThreadInit = FlowRecyclerThreadInit;
+    tmm_modules[TMM_FLOWRECYCLER].ThreadDeinit = FlowRecyclerThreadDeinit;
+//    tmm_modules[TMM_FLOWRECYCLER].RegisterTests = FlowRecyclerRegisterTests;
+    tmm_modules[TMM_FLOWRECYCLER].Management = FlowRecycler;
+    tmm_modules[TMM_FLOWRECYCLER].cap_flags = 0;
+    tmm_modules[TMM_FLOWRECYCLER].flags = TM_FLAG_MANAGEMENT_TM;
+
+_TmSlotSetFuncAppend(ThreadVars *tv, TmModule *tm, void *data)
+
+    slot->tv = tv;
+    slot->SlotThreadInit = tm->ThreadInit;
+    slot->slot_initdata = data;
+    SC_ATOMIC_INIT(slot->SlotFunc);
+    (void)SC_ATOMIC_SET(slot->SlotFunc, tm->Func);
+    slot->PktAcqLoop = tm->PktAcqLoop;
+    slot->Management = tm->Management;
+    slot->SlotThreadExitPrintStats = tm->ThreadExitPrintStats;
+    slot->SlotThreadDeinit = tm->ThreadDeinit;
+
+4. FlowRecyclerThreadSpawn --> TmThreadSpawn -- > TmThreadsManagement;
+
+5. TmThreadsManagement -->  FlowRecyclerThreadInit
+set slot->slot_data = FlowRecyclerThreadData *ftd
+
+6. TmThreadsManagement --> Management = FlowRecycler ( Thread that manages timed out flows.)

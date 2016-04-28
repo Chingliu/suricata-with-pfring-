@@ -1,0 +1,106 @@
+1. RunModeSetLiveCaptureAutoFp -- > ThreadVars *tv_detect_ncpu
+        ThreadVars *tv_detect_ncpu =
+            TmThreadCreatePacketHandler(tname,
+                                        qname, "flow",
+                                        "packetpool", "packetpool",
+                                        "varslot");
+tname = "Detect1"
+inq_name = "pickup1"
+inqh_name = "flow"
+outq_name =  "packetpool"
+outqh_name = "packetpool"
+slots = "varslot"
+
+2. TmThreadCreatePacketHandler --> TmThreadCreate
+2.1 set the incoming queue:
+tmq = TmqGetQueueByName("pickup1");
+tv->inq = tmq;
+ tmqh = TmqhGetQueueHandlerByName("flow");
+tv->tmqh_in = tmqh->InHandler; =  tmqh_table[TMQH_FLOW].InHandler = TmqhInputFlow;
+
+NOTE THAT: suricata_pfring steps 4 has created a outq_name = "pickup1"
+---4. RunModeSetLiveCaptureAutoFp-->TmThreadCreatePacketHandler(ThreadVars *tv_receive):
+---inq_name ="packetpool", inqh_name= "packetpool"
+---outq_name ="pickup1", outqh_name = "flow", slots = "pktacqloop"
+
+so --tv_receive---->pickup 1 queue --Detect1-->
+
+2.2 TmqhInputFlow :
+PacketQueue *q = &trans_q[tv->inq->id]; = &trans_q[TmqGetQueueByName("pickup1")->id]
+
+2.3 /* set the outgoing queue */
+tmqh = TmqhGetQueueHandlerByName(outqh_name);=TmqhGetQueueHandlerByName("packetpool")
+ tv->tmqh_out = tmqh->OutHandler ;= TmqhOutputPacketpool
+tv->outqh_name = tmqh->name;= "packetpool"
+
+3. TmThreadSetSlots: slots = "varslot"
+    if (strcmp(name, "varslot") == 0) {
+        tv->tm_func = TmThreadsSlotVar;
+
+4. RunModeSetLiveCaptureAutoFp --> TmModule *tm_module = TmModuleGetByName("StreamTcp");
+    tmm_modules[TMM_STREAMTCP].name = "StreamTcp";
+    tmm_modules[TMM_STREAMTCP].ThreadInit = StreamTcpThreadInit;
+    tmm_modules[TMM_STREAMTCP].Func = StreamTcp;
+    tmm_modules[TMM_STREAMTCP].ThreadExitPrintStats = StreamTcpExitPrintStats;
+    tmm_modules[TMM_STREAMTCP].ThreadDeinit = StreamTcpThreadDeinit;
+    tmm_modules[TMM_STREAMTCP].RegisterTests = StreamTcpRegisterTests;
+    tmm_modules[TMM_STREAMTCP].cap_flags = 0;
+    tmm_modules[TMM_STREAMTCP].flags = TM_FLAG_STREAM_TM;
+
+_TmSlotSetFuncAppend
+
+    slot->tv = tv;
+    slot->SlotThreadInit = tm->ThreadInit;
+    slot->slot_initdata = data;
+    SC_ATOMIC_INIT(slot->SlotFunc);
+    (void)SC_ATOMIC_SET(slot->SlotFunc, tm->Func);
+    slot->PktAcqLoop = tm->PktAcqLoop;
+    slot->Management = tm->Management;
+    slot->SlotThreadExitPrintStats = tm->ThreadExitPrintStats;
+    slot->SlotThreadDeinit = tm->ThreadDeinit;
+
+5  if (DetectEngineEnabled())
+    tmm_modules[TMM_DETECT].name = "Detect";
+    tmm_modules[TMM_DETECT].ThreadInit = DetectThreadInit;
+    tmm_modules[TMM_DETECT].Func = Detect;
+    tmm_modules[TMM_DETECT].ThreadExitPrintStats = DetectExitPrintStats;
+    tmm_modules[TMM_DETECT].ThreadDeinit = DetectThreadDeinit;
+    tmm_modules[TMM_DETECT].RegisterTests = SigRegisterTests;
+    tmm_modules[TMM_DETECT].cap_flags = 0;
+    tmm_modules[TMM_DETECT].flags = TM_FLAG_DETECT_TM;
+
+_TmSlotSetFuncAppend
+
+    slot->tv = tv;
+    slot->SlotThreadInit = tm->ThreadInit;
+    slot->slot_initdata = data;
+    SC_ATOMIC_INIT(slot->SlotFunc);
+    (void)SC_ATOMIC_SET(slot->SlotFunc, tm->Func);
+    slot->PktAcqLoop = tm->PktAcqLoop;
+    slot->Management = tm->Management;
+    slot->SlotThreadExitPrintStats = tm->ThreadExitPrintStats;
+    slot->SlotThreadDeinit = tm->ThreadDeinit;
+
+6. tm_module = TmModuleGetByName("RespondReject");
+    tmm_modules[TMM_RESPONDREJECT].name = "RespondReject";
+    tmm_modules[TMM_RESPONDREJECT].ThreadInit = NULL;
+    tmm_modules[TMM_RESPONDREJECT].Func = RespondRejectFunc;
+    tmm_modules[TMM_RESPONDREJECT].ThreadDeinit = NULL;
+    tmm_modules[TMM_RESPONDREJECT].RegisterTests = NULL;
+    tmm_modules[TMM_RESPONDREJECT].cap_flags = 0; /* libnet is not compat with caps */
+_TmSlotSetFuncAppend
+
+7.        /* add outputs as well */
+        SetupOutputs(tv_detect_ncpu);
+
+
+8.TmThreadSpawn(tv_detect_ncpu) call TmThreadsSlotVar; please see steps 3
+
+9. TmThreadsSlotVar:
+        /* input a packet */
+        p = tv->tmqh_in(tv);
+            /* run the thread module(s) */
+            r = TmThreadsSlotVarRun(tv, p, s); StreamTcp --> Detect -->  RespondRejectFunc --> output
+        /* output the packet */
+        tv->tmqh_out(tv, p);
+
